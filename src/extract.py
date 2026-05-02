@@ -1,71 +1,89 @@
+"""
+Batch Data Extractor
+Crawls the dataset, applies the DSP pipeline, and saves discrete chunk .wav files.
+Enforces Parent-File naming conventions to prevent train/val leakage.
+"""
 import os
-import numpy as np
-# 1. IMPORT YOUR TOOLBOX!
-from preprocess import resample_audio, butter_lowpass_filter, convert_to_model_input, compute_logmel_spectrogram
+import soundfile as sf
+from tqdm import tqdm
+from preprocess import process_and_chunk
 
-# 2. SETUP PATHS
+# ============================================================
+# --- SETUP & PATHS ---
+# ============================================================
 DATASET_ROOT = "H:/.shortcut-targets-by-id/1pFPnn7lbpxWVfOmrDEyvHxXp0_6GFB90/Students"
-SAVE_DIR = "H:/Processed_Machine_Data"
-os.makedirs(SAVE_DIR, exist_ok=True)
+SAVE_DIR = "H:/Processed_Machine_Chunks" # Changed name to reflect wav chunks
+TARGET_SR = 16000
 
-def process_and_save_batches():
-    """Crawls the dataset, processes audio, and saves features in batches."""
-    machines = ["Machine 1", "Machine 2", "Machine 3"]
-    states = {"Normal": 0, "Abnormal": 1} 
-    target_sr = 16000
+MACHINES = ["Machine 1", "Machine 2", "Machine 3"]
+STATES = ["Normal", "Abnormal"]
+
+def run_extraction_pipeline():
+    print("🚀 Starting Industrial Audio Extraction Pipeline...")
+    os.makedirs(SAVE_DIR, exist_ok=True)
     
-    print("🚀 Starting Batch Extraction Pipeline...")
+    total_files_processed = 0
+    total_chunks_yielded = 0
     
-    for machine in machines:
-        machine_spectrograms = []
-        machine_labels = []
+    for machine in MACHINES:
+        print(f"\n⚙️  Processing {machine}...")
         
-        print(f"\n⚙️ Processing {machine}...")
-        
-        for state_name, state_label in states.items():
-            folder_path = os.path.join(DATASET_ROOT, machine, "machine_data", state_name)
+        for state in STATES:
+            folder_path = os.path.join(DATASET_ROOT, machine, "machine_data", state)
+            
+            # Create matching output directory structure
+            output_dir = os.path.join(SAVE_DIR, machine, state)
+            os.makedirs(output_dir, exist_ok=True)
             
             if not os.path.exists(folder_path):
-                print(f"⚠️ Warning: Could not find {folder_path}")
+                print(f"  ⚠️ Warning: Path not found: {folder_path}")
                 continue
                 
             audio_files = [f for f in os.listdir(folder_path) if f.endswith('.wav')]
-            print(f"  -> Found {len(audio_files)} {state_name} files.")
+            print(f"  -> Found {len(audio_files)} {state} files. Extracting chunks...")
             
-            # --- THE BATCH PROCESSING LOOP ---
-            for i, filename in enumerate(audio_files):
+            # Use tqdm for a professional progress bar
+            for filename in tqdm(audio_files, desc=f"{state} Files", unit="file"):
                 file_path = os.path.join(folder_path, filename)
                 
-                try:
-                    # Step A: Use Toolbox to get clean audio
-                    y, sr = resample_audio(file_path, target_sr=target_sr)
-                    y_filtered = butter_lowpass_filter(y, cutoff_freq=4000, sample_rate=sr)
-                    y_fixed = convert_to_model_input(y_filtered, target_length=target_sr) # 1 second
-                    
-                    # Step B: Use Toolbox to get Spectrogram
-                    logmel = compute_logmel_spectrogram(y_fixed, sr=sr)
-                    
-                    # Step C: Add to our batch
-                    machine_spectrograms.append(logmel)
-                    machine_labels.append(state_label)
-                    
-                except Exception as e:
-                    print(f"  ❌ Error on {filename}: {e}")
+                # Get the base name without extension (e.g., 'rec_001' from 'rec_001.wav')
+                base_name = os.path.splitext(filename)[0]
                 
-                if (i + 1) % 50 == 0:
-                    print(f"     Processed {i + 1}/{len(audio_files)}...")
+                try:
+                    # 1. Run the heavy DSP pipeline
+                    result = process_and_chunk(
+                        file_path, 
+                        sr=TARGET_SR,
+                        chunk_sec=0.5,
+                        overlap_sec=0.25,
+                        rms_threshold_ratio=0.30,
+                        cv_threshold=1.2
+                    )
+                    
+                    kept_chunks = result["kept_chunks"]
+                    
+                    # 2. Save the surviving chunks with PARENT-LINKED naming
+                    for idx, chunk in enumerate(kept_chunks):
+                        # Naming convention: rec001_chunk_00.wav
+                        chunk_filename = f"{base_name}_chunk_{idx:02d}.wav"
+                        chunk_save_path = os.path.join(output_dir, chunk_filename)
+                        
+                        # sf.write is the industry standard for writing audio files
+                        sf.write(chunk_save_path, chunk, TARGET_SR)
+                        
+                        total_chunks_yielded += 1
+                        
+                except Exception as e:
+                    print(f"\n  ❌ Pipeline Error on {filename}: {str(e)}")
+                    
+                total_files_processed += 1
 
-        # --- SAVE THE BATCH ---
-        # Convert lists to NumPy arrays
-        X = np.array(machine_spectrograms)
-        y = np.array(machine_labels)
-        
-        # Save this machine's data to the hard drive!
-        save_file = os.path.join(SAVE_DIR, f"{machine.replace(' ', '_')}_features.npz")
-        np.savez_compressed(save_file, features=X, labels=y)
-        
-        print(f"✅ {machine} complete! Saved to {save_file}")
-        print(f"📊 Final batch shape - Features: {X.shape}, Labels: {y.shape}")
+    print("\n" + "="*50)
+    print("✅ BATCH EXTRACTION COMPLETE")
+    print(f"📊 Total source files processed: {total_files_processed}")
+    print(f"📊 Total valid chunks yielded:   {total_chunks_yielded}")
+    print(f"📁 Chunks saved to: {SAVE_DIR}")
+    print("="*50)
 
 if __name__ == "__main__":
-    process_and_save_batches()
+    run_extraction_pipeline()
