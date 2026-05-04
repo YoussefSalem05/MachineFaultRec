@@ -11,8 +11,12 @@ from preprocess import process_and_chunk
 # ============================================================
 # --- SETUP & PATHS ---
 # ============================================================
+
+# This dynamically builds the path to your actual system Downloads folder
+user_home = os.path.expanduser("~") 
+SAVE_DIR = os.path.join(user_home, "Downloads", "Processed_Machine_Chunks")
 DATASET_ROOT = "H:/.shortcut-targets-by-id/1pFPnn7lbpxWVfOmrDEyvHxXp0_6GFB90/Students"
-SAVE_DIR = "H:/Processed_Machine_Chunks" # Changed name to reflect wav chunks
+SAVE_DIR = "Downloads/Processed_Machine_Chunks" # Changed name to reflect wav chunks
 TARGET_SR = 16000
 
 MACHINES = ["Machine 1", "Machine 2", "Machine 3"]
